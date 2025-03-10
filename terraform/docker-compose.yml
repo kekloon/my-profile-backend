@@ -1,0 +1,6 @@
+services:
+  terraform:
+    build: .
+    volumes:
+      - .:/app
+    env_file: .env
