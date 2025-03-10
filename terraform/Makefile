@@ -1,4 +1,4 @@
-DOCKER_COMPOSE=docker-compose run terraform 
+DOCKER_COMPOSE = docker-compose run --rm terraform
 
 help:
 	@echo "commands:"
@@ -26,7 +26,13 @@ destroy:
 	$(DOCKER_COMPOSE) destroy
 
 fmt:
-	$(DOCKER_COMPOSE) fmt
+	$(DOCKER_COMPOSE) fmt -recursive
 
 console:
 	$(DOCKER_COMPOSE) console
+
+output:
+	$(DOCKER_COMPOSE) output
+
+list:
+	$(DOCKER_COMPOSE) state list
