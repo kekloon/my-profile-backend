@@ -1,8 +1,11 @@
+FROM golang:1.23 as build
+
+WORKDIR /lambda
+
+COPY lambda/go.mod lambda/go.sum ./
+COPY lambda/main.go ./
+RUN go build -tags lambda.norpc -o main main.go
+
 FROM public.ecr.aws/lambda/go:latest
-
-COPY main.go .
-RUN go mod init lambda-function-go
-RUN go mod tidy
-RUN GOOS=linux GOARCH=amd64 go build -o bootstrap main.go
-
-CMD [ "bootstrap" ]
+COPY --from=build /lambda/main ./main
+ENTRYPOINT [ "./main" ]
