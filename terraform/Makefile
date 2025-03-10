@@ -1,4 +1,4 @@
-DOCKER_COMPOSE = docker-compose run --rm terraform
+DOCKER_COMPOSE = docker-compose run --rm --remove-orphans terraform
 
 help:
 	@echo "commands:"
