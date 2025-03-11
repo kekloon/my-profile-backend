@@ -4,7 +4,7 @@ WORKDIR /lambda
 
 COPY lambda/go.mod lambda/go.sum ./
 COPY lambda/main.go ./
-RUN go build -tags lambda.norpc -o main main.go
+RUN CGO_ENABLED=0 go build -tags lambda.norpc -o main main.go
 
 FROM public.ecr.aws/lambda/go:latest
 COPY --from=build /lambda/main ./main
