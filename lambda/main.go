@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/aws/aws-lambda-go/lambda"
@@ -26,9 +25,8 @@ type Request struct {
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	if os.Getenv("BUCKET_NAME") == "" {
+		_ = godotenv.Load()
 	}
 
 	lambda.Start(handleRequest)
