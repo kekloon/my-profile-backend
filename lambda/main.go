@@ -116,11 +116,7 @@ func handleGetMessages(ctx context.Context, s3Client *s3.Client) (events.APIGate
 	}
 
 	jsonData, _ := json.Marshal(messages)
-	return events.APIGatewayProxyResponse{
-		StatusCode: 200,
-		Headers:    map[string]string{"Content-Type": "application/json"},
-		Body:       string(jsonData),
-	}, nil
+	return createResponse(200, string(jsonData))
 }
 
 func fetchMessagesFromS3(ctx context.Context, s3Client *s3.Client) ([]Message, error) {
@@ -165,16 +161,29 @@ func uploadMessagesToS3(ctx context.Context, s3Client *s3.Client, messages []Mes
 	return err
 }
 
+func createResponse(statusCode int, body string) (events.APIGatewayProxyResponse, error) {
+	return events.APIGatewayProxyResponse{
+		StatusCode: statusCode,
+		Headers: map[string]string{
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "OPTIONS, GET, POST",
+			"Access-Control-Allow-Headers": "Content-Type",
+		},
+		Body: body,
+	}, nil
+}
+
 func successResponse(msg string) (events.APIGatewayProxyResponse, error) {
-	return events.APIGatewayProxyResponse{StatusCode: 200, Body: msg}, nil
+	return createResponse(200, msg)
 }
 
 func clientError(msg string) (events.APIGatewayProxyResponse, error) {
-	return events.APIGatewayProxyResponse{StatusCode: 400, Body: msg}, nil
+	return createResponse(400, msg)
 }
 
 func serverError(msg string) (events.APIGatewayProxyResponse, error) {
-	return events.APIGatewayProxyResponse{StatusCode: 500, Body: msg}, nil
+	return createResponse(500, msg)
 }
 
 func unixTimestamp() int64 {

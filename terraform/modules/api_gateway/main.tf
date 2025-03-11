@@ -66,6 +66,31 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   ]
 }
 
+resource "aws_api_gateway_method_response" "options_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.lambda_resource.id
+  http_method = aws_api_gateway_method.lambda_get_method.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.lambda_resource.id
+  http_method = aws_api_gateway_method.lambda_get_method.http_method
+  status_code = "200"
+  response_parameters = {
+  "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  "method.response.header.Access-Control-Allow-Methods" = "'GET, POST, OPTIONS'"
+  "method.response.header.Access-Control-Allow-Headers" = "'Content-Type, Authorization'"
+  }
+}
+
 resource "aws_api_gateway_stage" "api_stage" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   deployment_id = aws_api_gateway_deployment.api_deployment.id
@@ -75,6 +100,7 @@ resource "aws_api_gateway_stage" "api_stage" {
     aws_api_gateway_deployment.api_deployment
   ]
 }
+
 
 resource "aws_lambda_permission" "api_gateway" {
   statement_id  = "AllowAPIGatewayInvoke"
