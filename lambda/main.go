@@ -61,7 +61,7 @@ func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	switch {
 	case request.HTTPMethod == "POST" && strings.HasPrefix(request.Path, "/message"):
 		return handleStoreMessage(ctx, request, s3Client)
-	case request.HTTPMethod == "GET" && strings.HasPrefix(request.Path, "/messages"):
+	case request.HTTPMethod == "GET" && strings.HasPrefix(request.Path, "/message"):
 		return handleGetMessages(ctx, s3Client)
 	default:
 		return clientError("Invalid route")

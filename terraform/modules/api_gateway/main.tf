@@ -43,12 +43,29 @@ resource "aws_api_gateway_integration" "lambda_get_integration" {
 
 resource "aws_api_gateway_deployment" "api_deployment" {
   rest_api_id = aws_api_gateway_rest_api.api.id
+
+  triggers = {
+    redeployment = sha1(jsonencode(aws_api_gateway_rest_api.api))
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.lambda_post_integration,
+    aws_api_gateway_integration.lambda_get_integration
+  ]
 }
 
 resource "aws_api_gateway_stage" "api_stage" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   deployment_id = aws_api_gateway_deployment.api_deployment.id
   stage_name    = "prod"
+
+  depends_on = [
+    aws_api_gateway_deployment.api_deployment
+  ]
 }
 
 resource "aws_lambda_permission" "api_gateway" {
@@ -56,5 +73,5 @@ resource "aws_lambda_permission" "api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = var.lambda_function.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
+  source_arn    = "${aws_api_gateway_stage.api_stage.execution_arn}/*"
 }
