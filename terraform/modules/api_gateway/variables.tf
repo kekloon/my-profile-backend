@@ -17,3 +17,7 @@ variable "lambda_function" {
     image_uri = string
   })
 }
+
+variable "lambda_role_name" {
+  type = string
+}

@@ -48,6 +48,6 @@ module "api_gateway" {
   project_name = "${var.project_name}"
   region = "${var.region}"
   lambda_function = "${module.lambda.lambda_function}"
-
+  lambda_role_name = "${module.iam.lambda_role_name}"
   depends_on = [module.lambda]
 }
