@@ -19,6 +19,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/joho/godotenv"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 )
 
 type Request struct {
@@ -28,11 +30,12 @@ type Request struct {
 }
 
 type Message struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Email   string `json:"email"`
-	Message string `json:"message"`
-	Time    int64  `json:"time"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Email       string `json:"email"`
+	Message     string `json:"message"`
+	Time        int64  `json:"time"`
+	EmotionType string `json:"emotion_type"`
 }
 
 var (
@@ -74,12 +77,15 @@ func handleStoreMessage(ctx context.Context, request events.APIGatewayProxyReque
 		return clientError("Invalid JSON request")
 	}
 
+	emotionType := checkMessageEmotionalType(req.Message)
+
 	newMessage := Message{
-		ID:      uuid.New().String(),
-		Name:    req.Name,
-		Email:   req.Email,
-		Message: req.Message,
-		Time:    unixTimestamp(),
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Email:       req.Email,
+		Message:     req.Message,
+		EmotionType: emotionType,
+		Time:        unixTimestamp(),
 	}
 
 	// Fetch existing messages
@@ -173,4 +179,44 @@ func serverError(msg string) (events.APIGatewayProxyResponse, error) {
 
 func unixTimestamp() int64 {
 	return time.Now().Unix()
+}
+
+func checkMessageEmotionalType(message string) string {
+	var OPENAI_API_KEY string = os.Getenv("OPENAI_API_KEY")
+
+	client := openai.NewClient(
+		option.WithAPIKey(OPENAI_API_KEY),
+	)
+	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(message),
+		}),
+		Tools: openai.F([]openai.ChatCompletionToolParam{
+			{
+				Type: openai.F(openai.ChatCompletionToolTypeFunction),
+				Function: openai.F(openai.FunctionDefinitionParam{
+					Name:        openai.String("check_message_emotional_type"),
+					Description: openai.String(`Check the emotional types of the message and return a set containing only "happy", "love", "angry", "sad", "afraid", "bored", or "calm".`),
+					Parameters: openai.F(openai.FunctionParameters{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"emotional_types": map[string]interface{}{
+								"type": "array",
+								"items": map[string]interface{}{
+									"type": "string",
+									"enum": []string{"happy", "love", "angry", "sad", "afraid", "bored", "calm"},
+								},
+							},
+						},
+						"required": []string{"emotional_types"},
+					}),
+				}),
+			},
+		}),
+		Model: openai.F(openai.ChatModelGPT4oMini),
+	})
+	if err != nil {
+		panic(err.Error())
+	}
+	return chatCompletion.Choices[0].Message.Content
 }
