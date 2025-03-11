@@ -1,21 +1,24 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
+	"log"
 	"os"
+	"sort"
+	"strings"
+	"time"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
 	"github.com/google/uuid"
 
 	"github.com/joho/godotenv"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
 )
 
 type Request struct {
@@ -24,96 +27,150 @@ type Request struct {
 	Message string `json:"message"`
 }
 
+type Message struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Email   string `json:"email"`
+	Message string `json:"message"`
+	Time    int64  `json:"time"`
+}
+
+var (
+	BucketName = os.Getenv("BUCKET_NAME")
+	FileKey    = "messages.json"
+)
+
 func main() {
+	lambda.Start(handleRequest)
+}
+
+func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Load environment variables for local development
 	if os.Getenv("BUCKET_NAME") == "" {
 		_ = godotenv.Load()
 	}
 
-	lambda.Start(handleRequest)
-}
-
-func handleRequest(ctx context.Context, request Request) (string, error) {
-	var BUCKET_NAME string = os.Getenv("BUCKET_NAME")
-
-	fmt.Println("BUCKET_NAME", BUCKET_NAME)
-	fmt.Println("Hello Sent From Lambda!", request)
-
-	// Check the emotional type of the message with OpenAI
-	emotionalType := checkMessageEmotionalType(request.Message)
-	fmt.Println("Emotional Type:", emotionalType)
-
-	// Create a JSON file with the data
-	jsonData := map[string]string{
-		"name":           request.Name,
-		"email":          request.Email,
-		"message":        request.Message,
-		"emotional_type": emotionalType,
-	}
-
-	jsonFile, err := os.Create("/tmp/output.json")
-	if err != nil {
-		return "", fmt.Errorf("failed to create json file: %v", err)
-	}
-	defer jsonFile.Close()
-
-	encoder := json.NewEncoder(jsonFile)
-	if err := encoder.Encode(jsonData); err != nil {
-		return "", fmt.Errorf("failed to encode json data: %v", err)
-	}
-
-	// Upload the JSON file to S3
 	sdkConfig, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		fmt.Println("Couldn't load default configuration. Have you set up your AWS account?")
-		fmt.Println(err)
-		return "", fmt.Errorf("failed to load default configuration: %v", err)
+		log.Printf("Failed to load AWS config: %v", err)
+		return serverError("Failed to load AWS config")
 	}
-
 	s3Client := s3.NewFromConfig(sdkConfig)
-	_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(BUCKET_NAME),
-		Key:    aws.String(fmt.Sprintf("%s-%s", uuid.New().String(), jsonFile.Name())),
-		Body:   jsonFile,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to upload file to S3: %v", err)
-	}
 
-	return "Successfully submitted!", nil
+	// Route API requests
+	switch {
+	case request.HTTPMethod == "POST" && strings.HasPrefix(request.Path, "/message"):
+		return handleStoreMessage(ctx, request, s3Client)
+	case request.HTTPMethod == "GET" && strings.HasPrefix(request.Path, "/messages"):
+		return handleGetMessages(ctx, s3Client)
+	default:
+		return clientError("Invalid route")
+	}
 }
 
-func checkMessageEmotionalType(Message string) string {
-	var OPENAI_API_KEY string = os.Getenv("OPENAI_API_KEY")
+func handleStoreMessage(ctx context.Context, request events.APIGatewayProxyRequest, s3Client *s3.Client) (events.APIGatewayProxyResponse, error) {
+	var req Request
+	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
+		return clientError("Invalid JSON request")
+	}
 
-	client := openai.NewClient(
-		option.WithAPIKey(OPENAI_API_KEY),
-	)
-	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
-		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-			openai.UserMessage(Message),
-		}),
-		Tools: openai.F([]openai.ChatCompletionToolParam{
-			{
-				Type: openai.F(openai.ChatCompletionToolTypeFunction),
-				Function: openai.F(openai.FunctionDefinitionParam{
-					Name:        openai.String("check_message_emotional_type"),
-					Description: openai.String(`Check the emotional type of the message only return "positive" or "negative"`),
-					Parameters: openai.F(openai.FunctionParameters{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"emotional_type": map[string]string{
-								"type": "string",
-							},
-						},
-						"required": []string{"emotional_type"},
-					}),
-				}),
-			},
-		}),
-		Model: openai.F(openai.ChatModelGPT4oMini),
+	newMessage := Message{
+		ID:      uuid.New().String(),
+		Name:    req.Name,
+		Email:   req.Email,
+		Message: req.Message,
+		Time:    unixTimestamp(),
+	}
+
+	// Fetch existing messages
+	messages, err := fetchMessagesFromS3(ctx, s3Client)
+	if err != nil {
+		return serverError("Failed to fetch messages")
+	}
+
+	// Append new message & keep only last 20
+	messages = append(messages, newMessage)
+	if len(messages) > 20 {
+		messages = messages[len(messages)-20:]
+	}
+
+	// Upload updated messages back to S3
+	err = uploadMessagesToS3(ctx, s3Client, messages)
+	if err != nil {
+		return serverError("Failed to store message")
+	}
+
+	return successResponse("Message stored successfully")
+}
+
+func handleGetMessages(ctx context.Context, s3Client *s3.Client) (events.APIGatewayProxyResponse, error) {
+	messages, err := fetchMessagesFromS3(ctx, s3Client)
+	if err != nil {
+		return serverError("Failed to retrieve messages")
+	}
+
+	jsonData, _ := json.Marshal(messages)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		Body:       string(jsonData),
+	}, nil
+}
+
+func fetchMessagesFromS3(ctx context.Context, s3Client *s3.Client) ([]Message, error) {
+	resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(FileKey),
 	})
 	if err != nil {
-		panic(err.Error())
+		log.Printf("File not found in S3, creating new one...")
+		return []Message{}, nil
 	}
-	return chatCompletion.Choices[0].Message.Content
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var messages []Message
+	if err := json.Unmarshal(body, &messages); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].Time > messages[j].Time
+	})
+
+	return messages, nil
+}
+
+func uploadMessagesToS3(ctx context.Context, s3Client *s3.Client, messages []Message) error {
+	jsonData, err := json.MarshalIndent(messages, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(FileKey),
+		Body:   bytes.NewReader(jsonData),
+	})
+	return err
+}
+
+func successResponse(msg string) (events.APIGatewayProxyResponse, error) {
+	return events.APIGatewayProxyResponse{StatusCode: 200, Body: msg}, nil
+}
+
+func clientError(msg string) (events.APIGatewayProxyResponse, error) {
+	return events.APIGatewayProxyResponse{StatusCode: 400, Body: msg}, nil
+}
+
+func serverError(msg string) (events.APIGatewayProxyResponse, error) {
+	return events.APIGatewayProxyResponse{StatusCode: 500, Body: msg}, nil
+}
+
+func unixTimestamp() int64 {
+	return time.Now().Unix()
 }
