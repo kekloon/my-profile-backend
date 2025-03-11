@@ -196,7 +196,7 @@ func checkMessageEmotionalType(message string) string {
 				Type: openai.F(openai.ChatCompletionToolTypeFunction),
 				Function: openai.F(openai.FunctionDefinitionParam{
 					Name:        openai.String("check_message_emotional_type"),
-					Description: openai.String(`Check the emotional types of the message and return a set containing only "happy", "love", "angry", "sad", "afraid", "bored", or "calm".`),
+					Description: openai.String(`Check the emotional type of the message and return only one from: "happy", "love", "angry", "sad", "afraid", "bored", or "calm".`),
 					Parameters: openai.F(openai.FunctionParameters{
 						"type": "object",
 						"properties": map[string]interface{}{
@@ -215,8 +215,30 @@ func checkMessageEmotionalType(message string) string {
 		}),
 		Model: openai.F(openai.ChatModelGPT4oMini),
 	})
+
 	if err != nil {
-		panic(err.Error())
+		log.Printf("OpenAI API error: %v", err)
+		return "unknown"
 	}
-	return chatCompletion.Choices[0].Message.Content
+
+	if len(chatCompletion.Choices) == 0 || chatCompletion.Choices[0].Message.ToolCalls == nil {
+		log.Printf("No tool call detected in OpenAI response")
+		return "unknown"
+	}
+
+	toolResponse := chatCompletion.Choices[0].Message.ToolCalls[0].Function.Arguments
+	var result struct {
+		EmotionalTypes []string `json:"emotional_types"`
+	}
+	err = json.Unmarshal([]byte(toolResponse), &result)
+	if err != nil {
+		log.Printf("Failed to parse emotional types: %v", err)
+		return "unknown"
+	}
+
+	if len(result.EmotionalTypes) == 0 {
+		return "unknown"
+	}
+
+	return result.EmotionalTypes[0]
 }
