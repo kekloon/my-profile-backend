@@ -38,15 +38,24 @@ The application is built using Terraform for infrastructure as code, deploying r
    ```plaintext
    AWS_ACCESS_KEY_ID=your-access-key-id
    AWS_SECRET_ACCESS_KEY=your-secret-access-key
-   OPENAI_API_KEY=your-openai-api-key
+   AWS_DEFAULT_REGION=your-region
+   ```
+   
+3. **Set up Terraform tfvars**:
+  Create a `terraform.auto.tfvars` file with the following variables:
+   ```plaintext
+   project_name= your-project-name
+   account_id = your-aws-account-id
+   region = your-aws-region
+   openai_api_key = your-openai-api-key
    ```
 
-3. **Initialize Terraform**:
+4. **Initialize Terraform**:
    ```bash
    make init
    ```
 
-4. **Deploy the infrastructure**:
+5. **Deploy the infrastructure**:
    ```bash
    make apply
    ```
